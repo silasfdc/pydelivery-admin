@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import api from '@/lib/api';
 interface Zone { id: string; name: string; fee: number; minOrderAmount: number; estimatedMinutes: number; isActive: boolean; }
-const fmt = (n:number) => new Intl.NumberFormat('es-PY').format(n);
+const fmt = (n:number|null|undefined) => new Intl.NumberFormat('es-PY').format(Number(n) || 0);
 export default function DeliveryZonesPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
