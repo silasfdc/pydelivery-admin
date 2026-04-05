@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useAuth } from '@/lib/auth-context';
 import api from '@/lib/api';
@@ -25,6 +25,27 @@ interface Order {
   notes: string | null;
   createdAt: string;
   items: OrderItem[];
+}
+
+// Play alert sound using Web Audio API
+function playAlertSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Play two beeps
+    [0, 0.2].forEach(delay => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      osc.type = 'sine';
+      gain.gain.value = 0.3;
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.15);
+    });
+  } catch (e) {
+    console.warn('Audio alert not available');
+  }
 }
 
 const STATUS_COLUMNS = [
@@ -91,11 +112,24 @@ export default function OrdersPage() {
   const [filterType, setFilterType] = useState<string>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [view, setView] = useState<'kanban' | 'list'>('kanban');
+  const prevPendingRef = useRef<number>(0);
 
   const fetchOrders = useCallback(async () => {
     try {
       const res = await api.get('/orders');
-      setOrders(res.data);
+      const data: Order[] = res.data;
+      const newPending = data.filter(o => o.status === 'PENDING').length;
+      
+      // Play alert if new pending orders appeared
+      if (newPending > prevPendingRef.current && prevPendingRef.current >= 0) {
+        playAlertSound();
+        // Also update page title to grab attention
+        document.title = `(${newPending}) 🔔 ¡Nuevo pedido! - PyDelivery`;
+        setTimeout(() => { document.title = 'PyDelivery Admin'; }, 5000);
+      }
+      prevPendingRef.current = newPending;
+      
+      setOrders(data);
     } catch (err) {
       console.error('Error loading orders', err);
     } finally {
