@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
+import { useAuth } from '@/lib/auth-context';
 import api from '@/lib/api';
 
 type ProviderType = 'META_OFFICIAL' | 'EVOLUTION';
@@ -17,12 +18,16 @@ interface WhatsAppConnection {
   metaPhoneNumberId?: string | null;
   metaVerifyToken?: string | null;
   evolutionBaseUrl?: string | null;
+  evolutionApiKey?: string | null;
   evolutionInstanceName?: string | null;
+  evolutionWebhookSecret?: string | null;
   evolutionMode?: EvolutionMode | null;
+  webhookSecret?: string | null;
+  metaAccessToken?: string | null;
   createdAt: string;
 }
 
-const initialForm = {
+const emptyForm = {
   providerType: 'EVOLUTION' as ProviderType,
   displayName: '',
   phoneNumber: '',
@@ -39,73 +44,108 @@ const initialForm = {
   isActive: true,
 };
 
+const WEBHOOK_BASE = 'https://pydelivery.metasync.com.br/webhooks/whatsapp';
+
 export default function WhatsAppPage() {
+  const { user } = useAuth();
   const [connections, setConnections] = useState<WhatsAppConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [message, setMessage] = useState({ text: '', type: '' });
+  const [msg, setMsg] = useState({ text: '', type: '' });
   const [testTo, setTestTo] = useState('');
   const [testText, setTestText] = useState('Hola, este es un mensaje de prueba desde PyDelivery 🚀');
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [copied, setCopied] = useState('');
 
-  async function loadConnections() {
+  const tenantId = user?.tenantId || '';
+
+  async function load() {
     try {
       const res = await api.get('/whatsapp/connections');
       setConnections(res.data);
-    } catch {
-      setMessage({ text: 'Error al cargar conexiones', type: 'error' });
-    } finally {
-      setLoading(false);
-    }
+    } catch { setMsg({ text: 'Error al cargar conexiones', type: 'error' }); }
+    finally { setLoading(false); }
   }
 
-  useEffect(() => { loadConnections(); }, []);
+  useEffect(() => { load(); }, []);
 
-  function updateForm(field: string, value: unknown) {
-    setForm((prev) => ({ ...prev, [field]: value }));
+  function upd(field: string, value: unknown) {
+    setForm((p) => ({ ...p, [field]: value }));
   }
 
-  function showMsg(text: string, type: 'success' | 'error') {
-    setMessage({ text, type });
-    setTimeout(() => setMessage({ text: '', type: '' }), 5000);
+  function flash(text: string, type: 'success' | 'error') {
+    setMsg({ text, type });
+    setTimeout(() => setMsg({ text: '', type: '' }), 5000);
   }
 
-  async function handleCreate(e: React.FormEvent) {
+  function openCreate() {
+    setForm(emptyForm);
+    setEditingId(null);
+    setShowForm(true);
+  }
+
+  function openEdit(c: WhatsAppConnection) {
+    setForm({
+      providerType: c.providerType,
+      displayName: c.displayName || '',
+      phoneNumber: c.phoneNumber || '',
+      webhookSecret: c.webhookSecret || '',
+      metaBusinessAccountId: c.metaBusinessAccountId || '',
+      metaPhoneNumberId: c.metaPhoneNumberId || '',
+      metaAccessToken: c.metaAccessToken || '',
+      metaVerifyToken: c.metaVerifyToken || '',
+      evolutionBaseUrl: c.evolutionBaseUrl || '',
+      evolutionApiKey: c.evolutionApiKey || '',
+      evolutionInstanceName: c.evolutionInstanceName || '',
+      evolutionWebhookSecret: c.evolutionWebhookSecret || '',
+      evolutionMode: (c.evolutionMode || 'BAILEYS') as EvolutionMode,
+      isActive: c.isActive,
+    });
+    setEditingId(c.id);
+    setShowForm(true);
+  }
+
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/whatsapp/connections', form);
-      setForm(initialForm);
+      if (editingId) {
+        await api.patch(`/whatsapp/connections/${editingId}`, form);
+        flash('✅ Conexión actualizada', 'success');
+      } else {
+        await api.post('/whatsapp/connections', form);
+        flash('✅ Conexión creada', 'success');
+      }
+      setForm(emptyForm);
       setShowForm(false);
-      showMsg('✅ Conexión creada exitosamente', 'success');
-      await loadConnections();
+      setEditingId(null);
+      await load();
     } catch (err: any) {
-      showMsg(err?.response?.data?.message || 'Error al crear conexión', 'error');
-    } finally {
-      setSaving(false);
-    }
+      flash(err?.response?.data?.message || 'Error al guardar', 'error');
+    } finally { setSaving(false); }
   }
 
   async function handleActivate(id: string) {
     try {
       await api.patch(`/whatsapp/connections/${id}/activate`);
-      showMsg('✅ Conexión activada', 'success');
-      await loadConnections();
-    } catch (err: any) {
-      showMsg(err?.response?.data?.message || 'Error al activar', 'error');
-    }
+      flash('✅ Conexión activada', 'success');
+      await load();
+    } catch (err: any) { flash(err?.response?.data?.message || 'Error al activar', 'error'); }
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('¿Deseas eliminar esta conexión?')) return;
     try {
       await api.delete(`/whatsapp/connections/${id}`);
-      showMsg('✅ Conexión eliminada', 'success');
-      await loadConnections();
+      setDeletingId(null);
+      flash('✅ Conexión eliminada', 'success');
+      await load();
     } catch (err: any) {
-      showMsg(err?.response?.data?.message || 'Error al eliminar', 'error');
+      setDeletingId(null);
+      flash(err?.response?.data?.message || 'Error al eliminar', 'error');
     }
   }
 
@@ -114,15 +154,20 @@ export default function WhatsAppPage() {
     setTesting(true);
     try {
       await api.post('/whatsapp/send-test', { to: testTo, text: testText });
-      showMsg('✅ Mensaje de prueba enviado', 'success');
-    } catch (err: any) {
-      showMsg(err?.response?.data?.message || 'Error al enviar', 'error');
-    } finally {
-      setTesting(false);
-    }
+      flash('✅ Mensaje de prueba enviado', 'success');
+    } catch (err: any) { flash(err?.response?.data?.message || 'Error al enviar', 'error'); }
+    finally { setTesting(false); }
   }
 
-  const activeConnection = connections.find((c) => c.isActive);
+  function copyUrl(url: string) {
+    navigator.clipboard.writeText(url);
+    setCopied(url);
+    setTimeout(() => setCopied(''), 2000);
+  }
+
+  const activeConn = connections.find((c) => c.isActive);
+  const webhookUrl = `${WEBHOOK_BASE}/evolution/${tenantId}`;
+  const metaWebhookUrl = `${WEBHOOK_BASE}/meta/${tenantId}`;
 
   return (
     <DashboardLayout>
@@ -130,145 +175,188 @@ export default function WhatsAppPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-white">💬 Conexiones WhatsApp</h2>
+            <h2 className="text-2xl font-bold text-white">💬 WhatsApp</h2>
             <p className="text-[var(--text-muted)] mt-1">
-              Configurá Meta Oficial o Evolution API. Solo 1 conexión activa por vez.
+              Configurá tu conexión Evolution API o Meta Oficial. Solo 1 activa por vez.
             </p>
           </div>
           <button
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => { showForm ? setShowForm(false) : openCreate(); }}
             className="rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 px-5 py-2.5 text-sm font-semibold text-white hover:from-violet-500 hover:to-purple-500 transition-all shadow-lg shadow-violet-500/20"
           >
             {showForm ? '✕ Cancelar' : '+ Nueva conexión'}
           </button>
         </div>
 
-        {/* Message */}
-        {message.text && (
+        {/* Flash Message */}
+        {msg.text && (
           <div className={`rounded-xl border px-4 py-3 text-sm ${
-            message.type === 'success'
+            msg.type === 'success'
               ? 'border-green-500/30 bg-green-500/10 text-green-300'
               : 'border-red-500/30 bg-red-500/10 text-red-300'
-          }`}>
-            {message.text}
-          </div>
+          }`}>{msg.text}</div>
         )}
 
-        {/* Create Form */}
+        {/* ═══ CREATE / EDIT FORM ═══ */}
         {showForm && (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6 animate-in fade-in duration-200">
-            <h3 className="text-lg font-semibold text-white mb-5">Nueva conexión</h3>
-            <form onSubmit={handleCreate} className="space-y-4">
-              {/* Provider selector */}
+            <h3 className="text-lg font-semibold text-white mb-5">
+              {editingId ? '✏️ Editar conexión' : '➕ Nueva conexión'}
+            </h3>
+            <form onSubmit={handleSave} className="space-y-4">
+              {/* Provider Selector */}
               <div className="grid gap-3 sm:grid-cols-2">
                 {(['EVOLUTION', 'META_OFFICIAL'] as ProviderType[]).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => updateForm('providerType', type)}
+                  <button key={type} type="button" onClick={() => upd('providerType', type)}
                     className={`rounded-xl border p-4 text-left transition-all ${
                       form.providerType === type
                         ? 'border-violet-500 bg-violet-500/10'
                         : 'border-[var(--border)] bg-[var(--bg-primary)] hover:border-[var(--text-muted)]'
-                    }`}
-                  >
+                    }`}>
                     <p className="font-semibold text-white">
                       {type === 'EVOLUTION' ? '🟢 Evolution API' : '🔵 Meta Oficial'}
                     </p>
                     <p className="text-xs text-[var(--text-muted)] mt-1">
-                      {type === 'EVOLUTION' ? 'Baileys / Cloud API' : 'WhatsApp Business API'}
+                      {type === 'EVOLUTION' ? 'Baileys / Cloud API — Gratis, self-hosted' : 'WhatsApp Business API — Oficial de Meta'}
                     </p>
                   </button>
                 ))}
               </div>
 
-              {/* Common fields */}
+              {/* Common Fields */}
               <div className="grid gap-4 sm:grid-cols-2">
-                <input value={form.displayName} onChange={(e) => updateForm('displayName', e.target.value)}
-                  placeholder="Nombre de la conexión" className="input-field" />
-                <input value={form.phoneNumber} onChange={(e) => updateForm('phoneNumber', e.target.value)}
-                  placeholder="Número WhatsApp (+595...)" className="input-field" />
+                <div>
+                  <label className="block text-xs text-[var(--text-muted)] mb-1">Nombre de la conexión</label>
+                  <input value={form.displayName} onChange={(e) => upd('displayName', e.target.value)}
+                    placeholder="Ej: WhatsApp Principal" className="input-field" />
+                </div>
+                <div>
+                  <label className="block text-xs text-[var(--text-muted)] mb-1">Número WhatsApp</label>
+                  <input value={form.phoneNumber} onChange={(e) => upd('phoneNumber', e.target.value)}
+                    placeholder="+595981123456" className="input-field" />
+                </div>
               </div>
 
-              {/* Meta fields */}
+              {/* ── EVOLUTION fields ── */}
+              {form.providerType === 'EVOLUTION' && (
+                <div className="space-y-4 rounded-xl border border-green-500/20 bg-green-500/5 p-4">
+                  <p className="text-sm font-medium text-green-300">🟢 Configuración Evolution API</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">URL Base *</label>
+                      <input value={form.evolutionBaseUrl} onChange={(e) => upd('evolutionBaseUrl', e.target.value)}
+                        placeholder="http://10.17.3.247:8080" className="input-field" required />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">Nombre de Instancia *</label>
+                      <input value={form.evolutionInstanceName} onChange={(e) => upd('evolutionInstanceName', e.target.value)}
+                        placeholder="3237delta" className="input-field" required />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">Modo</label>
+                      <select value={form.evolutionMode} onChange={(e) => upd('evolutionMode', e.target.value)}
+                        className="input-field">
+                        <option value="BAILEYS">BAILEYS</option>
+                        <option value="CLOUD_API">CLOUD_API</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">Webhook Secret (opcional)</label>
+                      <input value={form.evolutionWebhookSecret} onChange={(e) => upd('evolutionWebhookSecret', e.target.value)}
+                        placeholder="Secret para validar webhooks" className="input-field" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[var(--text-muted)] mb-1">API Key *</label>
+                    <input type="password" value={form.evolutionApiKey} onChange={(e) => upd('evolutionApiKey', e.target.value)}
+                      placeholder="Global API Key da Evolution" className="input-field" required />
+                  </div>
+                </div>
+              )}
+
+              {/* ── META fields ── */}
               {form.providerType === 'META_OFFICIAL' && (
                 <div className="space-y-4 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
                   <p className="text-sm font-medium text-blue-300">🔵 Configuración Meta</p>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <input value={form.metaBusinessAccountId} onChange={(e) => updateForm('metaBusinessAccountId', e.target.value)}
-                      placeholder="Business Account ID" className="input-field" />
-                    <input value={form.metaPhoneNumberId} onChange={(e) => updateForm('metaPhoneNumberId', e.target.value)}
-                      placeholder="Phone Number ID *" className="input-field" required />
-                    <input value={form.metaVerifyToken} onChange={(e) => updateForm('metaVerifyToken', e.target.value)}
-                      placeholder="Verify Token" className="input-field" />
-                    <input value={form.webhookSecret} onChange={(e) => updateForm('webhookSecret', e.target.value)}
-                      placeholder="Webhook Secret" className="input-field" />
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">Business Account ID</label>
+                      <input value={form.metaBusinessAccountId} onChange={(e) => upd('metaBusinessAccountId', e.target.value)}
+                        placeholder="ID da conta business" className="input-field" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">Phone Number ID *</label>
+                      <input value={form.metaPhoneNumberId} onChange={(e) => upd('metaPhoneNumberId', e.target.value)}
+                        placeholder="ID do número" className="input-field" required />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">Verify Token</label>
+                      <input value={form.metaVerifyToken} onChange={(e) => upd('metaVerifyToken', e.target.value)}
+                        placeholder="Token de verificação" className="input-field" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">Webhook Secret</label>
+                      <input value={form.webhookSecret} onChange={(e) => upd('webhookSecret', e.target.value)}
+                        placeholder="Secret do webhook" className="input-field" />
+                    </div>
                   </div>
-                  <textarea value={form.metaAccessToken} onChange={(e) => updateForm('metaAccessToken', e.target.value)}
-                    placeholder="Access Token *" className="input-field min-h-[90px] resize-none" required />
-                </div>
-              )}
-
-              {/* Evolution fields */}
-              {form.providerType === 'EVOLUTION' && (
-                <div className="space-y-4 rounded-xl border border-green-500/20 bg-green-500/5 p-4">
-                  <p className="text-sm font-medium text-green-300">🟢 Configuración Evolution</p>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <input value={form.evolutionBaseUrl} onChange={(e) => updateForm('evolutionBaseUrl', e.target.value)}
-                      placeholder="URL base (https://...) *" className="input-field" required />
-                    <input value={form.evolutionInstanceName} onChange={(e) => updateForm('evolutionInstanceName', e.target.value)}
-                      placeholder="Nombre de instancia *" className="input-field" required />
-                    <select value={form.evolutionMode} onChange={(e) => updateForm('evolutionMode', e.target.value)}
-                      className="input-field">
-                      <option value="BAILEYS">BAILEYS</option>
-                      <option value="CLOUD_API">CLOUD_API</option>
-                    </select>
-                    <input value={form.evolutionWebhookSecret} onChange={(e) => updateForm('evolutionWebhookSecret', e.target.value)}
-                      placeholder="Webhook Secret" className="input-field" />
+                  <div>
+                    <label className="block text-xs text-[var(--text-muted)] mb-1">Access Token *</label>
+                    <input type="password" value={form.metaAccessToken} onChange={(e) => upd('metaAccessToken', e.target.value)}
+                      placeholder="Token de acesso" className="input-field" required />
                   </div>
-                  <textarea value={form.evolutionApiKey} onChange={(e) => updateForm('evolutionApiKey', e.target.value)}
-                    placeholder="API Key *" className="input-field min-h-[90px] resize-none" required />
                 </div>
               )}
 
               {/* Active toggle */}
               <label className="flex items-center gap-3 cursor-pointer">
                 <input type="checkbox" checked={form.isActive}
-                  onChange={(e) => updateForm('isActive', e.target.checked)}
+                  onChange={(e) => upd('isActive', e.target.checked)}
                   className="w-4 h-4 accent-violet-500" />
                 <span className="text-sm text-[var(--text-secondary)]">Activar al guardar (desactiva las demás)</span>
               </label>
 
-              <button type="submit" disabled={saving}
-                className="rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-3 font-semibold text-white hover:from-violet-500 hover:to-purple-500 disabled:opacity-60 transition-all shadow-lg shadow-violet-500/20">
-                {saving ? 'Guardando...' : 'Guardar conexión'}
-              </button>
+              <div className="flex gap-3">
+                <button type="submit" disabled={saving}
+                  className="rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-3 font-semibold text-white hover:from-violet-500 hover:to-purple-500 disabled:opacity-60 transition-all shadow-lg shadow-violet-500/20">
+                  {saving ? '⏳ Guardando...' : editingId ? '💾 Guardar cambios' : '+ Crear conexión'}
+                </button>
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }}
+                  className="rounded-xl border border-[var(--border)] px-6 py-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-all">
+                  Cancelar
+                </button>
+              </div>
             </form>
           </div>
         )}
 
-        {/* Active Connection Card */}
+        {/* ═══ ACTIVE CONNECTION CARD ═══ */}
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6">
           <h3 className="text-lg font-semibold text-white mb-4">Conexión activa</h3>
-          {activeConnection ? (
+          {activeConn ? (
             <div className="rounded-xl border border-violet-500/30 bg-gradient-to-r from-violet-500/10 to-purple-500/10 p-5">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
                     <span className="font-semibold text-white text-lg">
-                      {activeConnection.displayName || 'Sin nombre'}
+                      {activeConn.displayName || 'Sin nombre'}
                     </span>
                   </div>
                   <p className="text-sm text-[var(--text-secondary)] mt-1">
-                    {activeConnection.providerType === 'META_OFFICIAL' ? '🔵 Meta Oficial' : '🟢 Evolution API'}
-                    {activeConnection.evolutionMode ? ` (${activeConnection.evolutionMode})` : ''}
+                    {activeConn.providerType === 'META_OFFICIAL' ? '🔵 Meta Oficial' : '🟢 Evolution API'}
+                    {activeConn.evolutionMode ? ` (${activeConn.evolutionMode})` : ''}
+                    {activeConn.evolutionInstanceName ? ` — ${activeConn.evolutionInstanceName}` : ''}
                   </p>
                   <p className="text-sm text-[var(--text-muted)] mt-0.5">
-                    📱 {activeConnection.phoneNumber || 'Sin número'}
+                    📱 {activeConn.phoneNumber || 'Sin número'}
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="flex items-center gap-2">
+                  <button onClick={() => openEdit(activeConn)}
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-blue-300 hover:bg-blue-500/10 hover:border-blue-500/30 transition-all">
+                    ✏️ Editar
+                  </button>
                   <span className="inline-block rounded-full bg-green-500/20 px-3 py-1 text-xs font-medium text-green-300">
                     ● Activa
                   </span>
@@ -276,12 +364,66 @@ export default function WhatsAppPage() {
               </div>
             </div>
           ) : (
-            <p className="text-[var(--text-muted)] text-sm">Ninguna conexión activa. Creá una arriba.</p>
+            <p className="text-[var(--text-muted)] text-sm">Ninguna conexión activa. Creá una nueva arriba.</p>
           )}
         </div>
 
-        {/* Test Send */}
-        {activeConnection && (
+        {/* ═══ WEBHOOK CONFIGURATION ═══ */}
+        {activeConn && (
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6">
+            <h3 className="text-lg font-semibold text-white mb-2">🔗 Configuración Webhook</h3>
+            <p className="text-sm text-[var(--text-muted)] mb-4">
+              Configurá esta URL en tu {activeConn.providerType === 'EVOLUTION' ? 'Evolution API' : 'Meta Developer'} para recibir mensajes.
+            </p>
+
+            <div className="space-y-3">
+              {/* Webhook URL */}
+              <div>
+                <label className="block text-xs text-[var(--text-muted)] mb-1">URL del Webhook</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 rounded-xl bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-2.5 text-sm text-emerald-400 font-mono break-all">
+                    {activeConn.providerType === 'EVOLUTION' ? webhookUrl : metaWebhookUrl}
+                  </code>
+                  <button
+                    onClick={() => copyUrl(activeConn.providerType === 'EVOLUTION' ? webhookUrl : metaWebhookUrl)}
+                    className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm text-white hover:bg-[var(--bg-hover)] transition-all whitespace-nowrap">
+                    {copied === (activeConn.providerType === 'EVOLUTION' ? webhookUrl : metaWebhookUrl) ? '✅ Copiado!' : '📋 Copiar'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Instructions */}
+              {activeConn.providerType === 'EVOLUTION' && (
+                <div className="rounded-xl bg-green-500/5 border border-green-500/15 p-4 space-y-2">
+                  <p className="text-sm font-medium text-green-300">📋 Pasos para configurar en Evolution API:</p>
+                  <ol className="text-sm text-[var(--text-secondary)] space-y-1 list-decimal list-inside">
+                    <li>Accedé al panel de tu Evolution API</li>
+                    <li>Seleccioná la instancia <code className="text-emerald-400">{activeConn.evolutionInstanceName}</code></li>
+                    <li>Andá a <strong className="text-white">Configuraciones → Webhook</strong></li>
+                    <li>Pegá la URL de arriba en el campo de Webhook</li>
+                    <li>Activá el evento <code className="text-emerald-400">messages.upsert</code></li>
+                    <li>Guardá la configuración</li>
+                  </ol>
+                </div>
+              )}
+
+              {activeConn.providerType === 'META_OFFICIAL' && (
+                <div className="rounded-xl bg-blue-500/5 border border-blue-500/15 p-4 space-y-2">
+                  <p className="text-sm font-medium text-blue-300">📋 Pasos para configurar en Meta:</p>
+                  <ol className="text-sm text-[var(--text-secondary)] space-y-1 list-decimal list-inside">
+                    <li>Andá a <strong className="text-white">Meta for Developers → Tu App → WhatsApp → Configuración</strong></li>
+                    <li>En "Webhook", pegá la URL de arriba</li>
+                    <li>Usá el Verify Token: <code className="text-blue-400">{activeConn.metaVerifyToken || '(no configurado)'}</code></li>
+                    <li>Suscribite al campo <code className="text-blue-400">messages</code></li>
+                  </ol>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ TEST SEND ═══ */}
+        {activeConn && (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6">
             <h3 className="text-lg font-semibold text-white mb-4">🧪 Enviar mensaje de prueba</h3>
             <form onSubmit={handleTestSend} className="flex flex-col sm:flex-row gap-3">
@@ -297,7 +439,7 @@ export default function WhatsAppPage() {
           </div>
         )}
 
-        {/* Connections Table */}
+        {/* ═══ ALL CONNECTIONS TABLE ═══ */}
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6">
           <h3 className="text-lg font-semibold text-white mb-4">Todas las conexiones</h3>
           {loading ? (
@@ -313,6 +455,7 @@ export default function WhatsAppPage() {
                   <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
                     <th className="pb-3 pr-4 font-medium">Nombre</th>
                     <th className="pb-3 pr-4 font-medium">Provider</th>
+                    <th className="pb-3 pr-4 font-medium">Instancia</th>
                     <th className="pb-3 pr-4 font-medium">Número</th>
                     <th className="pb-3 pr-4 font-medium">Estado</th>
                     <th className="pb-3 font-medium">Acciones</th>
@@ -324,6 +467,10 @@ export default function WhatsAppPage() {
                       <td className="py-3.5 pr-4 text-white font-medium">{conn.displayName || '—'}</td>
                       <td className="py-3.5 pr-4 text-[var(--text-secondary)]">
                         {conn.providerType === 'META_OFFICIAL' ? '🔵 Meta' : '🟢 Evolution'}
+                        {conn.evolutionMode ? <span className="text-xs text-[var(--text-muted)] ml-1">({conn.evolutionMode})</span> : ''}
+                      </td>
+                      <td className="py-3.5 pr-4 text-[var(--text-secondary)] font-mono text-xs">
+                        {conn.evolutionInstanceName || conn.metaPhoneNumberId || '—'}
                       </td>
                       <td className="py-3.5 pr-4 text-[var(--text-secondary)]">{conn.phoneNumber || '—'}</td>
                       <td className="py-3.5 pr-4">
@@ -339,16 +486,29 @@ export default function WhatsAppPage() {
                       </td>
                       <td className="py-3.5">
                         <div className="flex gap-2">
+                          <button onClick={() => openEdit(conn)}
+                            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-blue-300 hover:bg-blue-500/10 hover:border-blue-500/30 transition-all">
+                            ✏️ Editar
+                          </button>
                           {!conn.isActive && (
                             <button onClick={() => handleActivate(conn.id)}
                               className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-violet-300 hover:bg-violet-500/10 hover:border-violet-500/30 transition-all">
                               ⚡ Activar
                             </button>
                           )}
-                          <button onClick={() => handleDelete(conn.id)}
-                            className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10 transition-all">
-                            🗑 Eliminar
-                          </button>
+                          {deletingId === conn.id ? (
+                            <div className="flex gap-1 items-center">
+                              <button onClick={() => handleDelete(conn.id)}
+                                className="rounded-lg px-3 py-1.5 text-xs bg-red-600 text-white font-medium animate-pulse">Sí</button>
+                              <button onClick={() => setDeletingId(null)}
+                                className="rounded-lg px-3 py-1.5 text-xs bg-gray-600/30 text-gray-300">No</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setDeletingId(conn.id)}
+                              className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10 transition-all">
+                              🗑 Eliminar
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
