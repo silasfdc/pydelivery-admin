@@ -16,14 +16,14 @@ export default function ProductsPage() {
   useEffect(() => { fetch(); }, []);
   const submit = async (e: React.FormEvent) => { e.preventDefault(); try { const d={...form,price:Number(form.price)}; if(editingId) await api.patch(`/products/${editingId}`,d); else await api.post('/products',d); setForm({name:'',description:'',price:0,categoryId:'',isAvailable:true}); setShowForm(false); setEditingId(null); fetch(); } catch(e){console.error(e);} };
   const edit = (p:Product) => { setForm({name:p.name,description:p.description||'',price:p.price,categoryId:p.categoryId,isAvailable:p.isAvailable}); setEditingId(p.id); setShowForm(true); };
-  const del = async (id:string) => { if(!confirm('¿Eliminar?')) return; try{await api.delete(`/products/${id}`); fetch();}catch(e){console.error(e);} };
+  const del = async (id:string) => { if(!confirm('¿Eliminar?')) return; try{await api.delete(`/products/${id}`); await fetch();}catch(e){console.error(e);} };
   const toggle = async (p:Product) => { try{await api.patch(`/products/${p.id}`,{isAvailable:!p.isAvailable}); fetch();}catch(e){console.error(e);} };
   return (
     <DashboardLayout>
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold text-white">🍔 Productos</h2>
-          <button onClick={()=>{setShowForm(!showForm);setEditingId(null);setForm({name:'',description:'',price:0,categoryId:'',isActive:true});}} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 hover:bg-violet-700 text-white transition-all">{showForm?'✕ Cerrar':'+ Nuevo'}</button>
+          <button onClick={()=>{setShowForm(!showForm);setEditingId(null);setForm({name:'',description:'',price:0,categoryId:'',isAvailable:true});}} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 hover:bg-violet-700 text-white transition-all">{showForm?'✕ Cerrar':'+ Nuevo'}</button>
         </div>
         {showForm&&<form onSubmit={submit} className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-5 space-y-4"><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div><label className="block text-xs text-[var(--text-muted)] mb-1">Nombre *</label><input type="text" required value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text-primary)] focus:outline-none focus:border-violet-500"/></div>
