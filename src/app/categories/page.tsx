@@ -10,12 +10,13 @@ export default function CategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', description: '', sortOrder: 0 });
   const fetchCategories = async () => { try { const r = await api.get('/categories'); setCategories(r.data); } catch(e){console.error(e);} finally{setLoading(false);} };
   useEffect(() => { fetchCategories(); }, []);
-  const handleSubmit = async (e: React.FormEvent) => { e.preventDefault(); try { if(editingId) await api.patch(`/categories/${editingId}`, form); else await api.post('/categories', form); setForm({name:'',description:'',sortOrder:0}); setShowForm(false); setEditingId(null); fetchCategories(); } catch(e){console.error(e);} };
+  const handleSubmit = async (e: React.FormEvent) => { e.preventDefault(); try { if(editingId) await api.patch(`/categories/${editingId}`, form); else await api.post('/categories', form); setForm({name:'',description:'',sortOrder:0}); setShowForm(false); setEditingId(null); await fetchCategories(); } catch(e){console.error(e);} };
   const handleEdit = (c: Category) => { setForm({name:c.name,description:c.description||'',sortOrder:c.sortOrder}); setEditingId(c.id); setShowForm(true); };
-  const handleDelete = async (id: string) => { if(!confirm('¿Eliminar?')) return; try { await api.delete(`/categories/${id}`); fetchCategories(); } catch(e){console.error(e);} };
+  const handleDelete = async (id: string) => { try { await api.delete(`/categories/${id}`); setDeletingId(null); await fetchCategories(); } catch(e){ console.error(e); setDeletingId(null); } };
   return (
     <DashboardLayout>
       <div className="space-y-5">
@@ -33,7 +34,17 @@ export default function CategoriesPage() {
         </form>)}
         {loading ? <div className="flex items-center justify-center h-40"><div className="animate-spin w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full"/></div> : (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden"><table className="w-full text-sm"><thead><tr className="border-b border-[var(--border)] text-[var(--text-muted)]"><th className="text-left p-4 font-medium">Nombre</th><th className="text-left p-4 font-medium">Descripción</th><th className="text-left p-4 font-medium">Orden</th><th className="text-left p-4 font-medium">Acciones</th></tr></thead><tbody>
-            {categories.map(c=><tr key={c.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-hover)]"><td className="p-4 font-medium">{c.name}</td><td className="p-4 text-[var(--text-secondary)]">{c.description||'—'}</td><td className="p-4">{c.sortOrder}</td><td className="p-4"><div className="flex gap-2"><button onClick={()=>handleEdit(c)} className="px-2 py-1 rounded-lg text-xs bg-blue-600/20 text-blue-300 hover:bg-blue-600/30">✏️</button><button onClick={()=>handleDelete(c.id)} className="px-2 py-1 rounded-lg text-xs bg-red-600/20 text-red-300 hover:bg-red-600/30">🗑️</button></div></td></tr>)}
+            {categories.map(c=><tr key={c.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-hover)]"><td className="p-4 font-medium">{c.name}</td><td className="p-4 text-[var(--text-secondary)]">{c.description||'—'}</td><td className="p-4">{c.sortOrder}</td><td className="p-4"><div className="flex gap-2">
+              <button onClick={()=>handleEdit(c)} className="px-2 py-1 rounded-lg text-xs bg-blue-600/20 text-blue-300 hover:bg-blue-600/30">✏️</button>
+              {deletingId===c.id ? (
+                <div className="flex gap-1 items-center">
+                  <button onClick={()=>handleDelete(c.id)} className="px-2 py-1 rounded-lg text-xs bg-red-600 text-white font-medium animate-pulse">Sí</button>
+                  <button onClick={()=>setDeletingId(null)} className="px-2 py-1 rounded-lg text-xs bg-gray-600/30 text-gray-300">No</button>
+                </div>
+              ) : (
+                <button onClick={()=>setDeletingId(c.id)} className="px-2 py-1 rounded-lg text-xs bg-red-600/20 text-red-300 hover:bg-red-600/30">🗑️</button>
+              )}
+            </div></td></tr>)}
             {categories.length===0&&<tr><td colSpan={4} className="p-8 text-center text-[var(--text-muted)]">Sin categorías 📁</td></tr>}
           </tbody></table></div>
         )}
